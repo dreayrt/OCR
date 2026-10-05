@@ -5,7 +5,6 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.database.database import init_db
 from app.services.ocr_service import OCRService
 from app.api.ocr import router as ocr_router
 from app.api.health import router as health_router
@@ -22,13 +21,10 @@ logger = logging.getLogger("ocr_service")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Quản lý Lifecycle của ứng dụng:
-    1. Tạo database schema nếu chưa có
-    2. Nạp sẵn PaddleOCR Model vào memory một lần duy nhất lúc startup
+    Quản lý Lifecycle của ứng dụng (Stateless):
+    - Nạp sẵn PaddleOCR Model vào memory một lần duy nhất lúc startup
     """
-    logger.info("Application starting up...")
-    # Khởi tạo DB tables
-    init_db()
+    logger.info("Application starting up (Stateless OCR Service)...")
 
     # Preload PaddleOCR singleton
     logger.info("Pre-warming PaddleOCR engine...")

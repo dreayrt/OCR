@@ -26,9 +26,9 @@ flowchart TD
     E1 --> E2{Kiểm tra Response}
     E2 -->|Fallback PaddleOCR 200 DPI| E3[Pass: Nhận diện chính xác trường thông tin]
 
-    E3 --> F[5. Database Verification]
-    F --> F1[Kiểm tra bảng documents có bản ghi COMPLETED]
-    F1 --> F2[Kiểm tra bảng document_fields có đủ các trường con]
+    E3 --> F[5. Payload JSON Verification]
+    F --> F1[Kiểm tra document_uuid & processing_status: COMPLETED]
+    F --> F2[Kiểm tra extracted_fields khớp target_fields để hệ thống Client map form]
     F2 --> Done([100% PASS - SẴN SÀNG PRODUCTION])
 ```
 
@@ -60,7 +60,7 @@ flowchart TD
 - **Kỳ vọng**:
   - Thời gian xử lý: `< 100ms`.
   - Độ tin cậy (`confidence`): `1.0`.
-  - Các trường bóc tách: Số hóa đơn, ngày tháng, mã số thuế, số tiền, tên người mua chính xác 100%.
+  - Các trường bóc tách: Số văn bản/hóa đơn, ngày tháng, mã số thuế, số tiền, tên các bên chính xác 100%.
 
 ---
 
@@ -73,19 +73,26 @@ flowchart TD
 
 ---
 
-### Bước 5: Kiểm tra tính toàn vẹn Cơ sở dữ liệu (Database Transaction)
-- **Mục đích**: Đảm bảo dữ liệu được lưu an toàn theo cơ chế Transaction (bảng cha `documents` và bảng con `document_fields`).
-- **Lệnh kiểm tra trong MySQL**:
-  ```sql
-  -- Kiểm tra tài liệu mới nhất
-  SELECT id, document_uuid, original_filename, ocr_engine, processing_status, created_at 
-  FROM documents 
-  ORDER BY id DESC LIMIT 5;
-
-  -- Kiểm tra các trường dữ liệu con tương ứng
-  SELECT document_id, field_name, field_value, confidence 
-  FROM document_fields 
-  WHERE document_id = (SELECT MAX(id) FROM documents);
+### Bước 5: Kiểm tra tính toàn vẹn Payload JSON (Stateless Integration)
+- **Mục đích**: Đảm bảo JSON trả về đầy đủ các trường để hệ thống chính của bạn bắt và auto-fill vào form trước khi submit lưu DB.
+- **Kỳ vọng định dạng JSON**:
+  ```json
+  {
+    "success": true,
+    "document_uuid": "...",
+    "processing_status": "COMPLETED",
+    "ocr_engine": "direct_text",
+    "confidence": 1.0,
+    "raw_text": "...",
+    "extracted_fields": {
+      "license_type": "...",
+      "contract_id": "...",
+      "issue_date": "...",
+      "expiry_date": "...",
+      "copyright_owner": "...",
+      "distributor": "..."
+    }
+  }
   ```
 
 ---

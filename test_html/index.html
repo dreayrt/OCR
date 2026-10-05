@@ -59,6 +59,20 @@
           </div>
         </div>
 
+        <!-- Cấu hình Bộ Lọc Trường (Target Fields / Presets) -->
+        <div class="endpoint-config" style="margin-top: 10px;">
+          <label for="presetSelect">Mẫu Tài Liệu (Preset Profile):</label>
+          <select id="presetSelect" style="width: 100%; padding: 8px 12px; background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); font-size: 13px; margin-bottom: 8px;">
+            <option value="all">🌐 Tự Động Trích Xuất Tất Cả (Auto Detect All)</option>
+            <option value="song_license" selected>🎵 Bản Quyền Bài Hát (song_licenses - 6 trường)</option>
+            <option value="profile">👤 Hồ Sơ Cá Nhân / CCCD (4 - 6 trường)</option>
+            <option value="invoice">🧾 Hóa Đơn / Chứng Từ (5 trường)</option>
+            <option value="custom">⚙️ Tùy Chỉnh Trường Cần Lấy (Custom Fields)</option>
+          </select>
+          <input type="text" id="targetFieldsInput" value="license_type,copyright_owner,distributor,contract_id,issue_date,expiry_date" placeholder="Ví dụ: license_type, copyright_owner, distributor..." style="width: 100%; padding: 8px 12px; background: var(--bg-input); color: #38bdf8; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); font-size: 12px; font-family: var(--font-mono);">
+        </div>
+
+
         <!-- Dropzone -->
         <div class="dropzone" id="dropzone">
           <input type="file" id="fileInput" accept=".pdf" class="file-input">
@@ -147,8 +161,17 @@
             </div>
           </div>
 
+          <!-- Raw Extracted Text Viewer -->
+          <div class="json-section" style="margin-top: 16px;">
+            <div class="json-header">
+              <span>Toàn Bộ Văn Bản Đọc Được (Raw Extracted Text)</span>
+              <button type="button" class="btn-copy" id="btnCopyRawText">Sao Chép Text</button>
+            </div>
+            <pre class="json-viewer" id="rawTextViewer" style="color: #a7f3d0; white-space: pre-wrap;"><code>Chưa có dữ liệu</code></pre>
+          </div>
+
           <!-- Raw JSON Viewer -->
-          <div class="json-section">
+          <div class="json-section" style="margin-top: 16px;">
             <div class="json-header">
               <span>JSON Response Chuẩn Hóa</span>
               <button type="button" class="btn-copy" id="btnCopyJson">Sao Chép JSON</button>
@@ -156,6 +179,7 @@
             <pre class="json-viewer" id="jsonViewer"><code>{}</code></pre>
           </div>
         </div>
+
       </section>
     </main>
   </div>

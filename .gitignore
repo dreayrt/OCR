@@ -1,0 +1,51 @@
+# Environment variables & secrets
+.env
+.env.local
+.env.*.local
+*.env
+
+# Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Database & Local temporary files
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE & Editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Operating System files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs & temp
+*.log
+logs/
+
+# PaddleOCR & DL Model downloads cache
+.paddleocr/
+.cache/

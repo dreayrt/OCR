@@ -1,6 +1,5 @@
 import logging
-from typing import Dict, Any
-from sqlalchemy.orm import Session
+from typing import Dict, Any, Optional, List
 from fastapi import UploadFile, HTTPException, status
 
 from app.config import settings
@@ -9,7 +8,7 @@ from app.utils.file_utils import generate_document_uuid
 from app.services.pdf_service import PDFService
 from app.services.ocr_service import OCRService
 from app.services.extraction_service import ExtractionService
-from app.models.document import Document, DocumentField, ProcessingStatus
+from app.schemas.document import ProcessingStatus
 
 logger = logging.getLogger(__name__)
 
@@ -19,19 +18,19 @@ class DocumentService:
     async def process_pdf(
         cls,
         file: UploadFile,
-        db: Session,
+        target_fields: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
+
         """
-        Flow xử lý chính của OCR Service:
+        Flow xử lý chính của OCR Service (Stateless Microservice):
         1. Đọc stream bytes từ memory
         2. Validate định dạng, size, MIME type
         3. Khởi tạo document UUID
         4. Thử trích xuất text trực tiếp bằng PyMuPDF
            - Nếu có text: dùng trực tiếp, KHÔNG gọi PaddleOCR
            - Nếu không có text (PDF scan): render 200 DPI và gửi mảng ảnh vào PaddleOCR
-        5. Trích xuất structured data (Rule/Regex)
-        6. Lưu dữ liệu an toàn với Database Transaction (Rollback nếu lỗi)
-        7. Trả về kết quả JSON chuẩn hóa
+        5. Trích xuất structured data (Rule/Regex) theo target_fields
+        6. Trả về kết quả JSON chuẩn hóa cho client
         """
         # Đọc dữ liệu trực tiếp trong memory, không ghi đĩa
         try:
@@ -85,51 +84,21 @@ class DocumentService:
             raw_text, base_confidence=ocr_confidence
         )
 
-        # 4. Database Transaction: Lưu trữ an toàn
-        try:
-            # Bắt đầu transaction
-            new_doc = Document(
-                document_uuid=document_uuid,
-                original_filename=original_filename,
-                mime_type=mime_type,
-                file_size=file_size,
-                raw_text=raw_text,
-                processing_status=ProcessingStatus.COMPLETED,
-                ocr_engine=ocr_engine,
-                ocr_confidence=ocr_confidence,
-            )
-            db.add(new_doc)
-            db.flush()  # Sinh new_doc.id
+        # Lọc danh sách fields nếu client chỉ định target_fields cụ thể
+        if target_fields:
+            extracted_fields = {k: v for k, v in extracted_fields.items() if k in target_fields}
+            field_confidences = {k: v for k, v in field_confidences.items() if k in target_fields}
 
-            # Thêm các field chi tiết
-            for field_name, field_value in extracted_fields.items():
-                if field_value is not None and str(field_value).strip():
-                    doc_field = DocumentField(
-                        document_id=new_doc.id,
-                        field_name=field_name,
-                        field_value=str(field_value),
-                        confidence=field_confidences.get(field_name, ocr_confidence),
-                    )
-                    db.add(doc_field)
 
-            db.commit()
-            logger.info(f"Document [{document_uuid}] successfully saved to database with {len(extracted_fields)} fields.")
-
-        except Exception as e:
-            db.rollback()
-            logger.error(f"Database transaction error for [{document_uuid}]: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={
-                    "error_code": "DATABASE_TRANSACTION_FAILED",
-                    "message": "Failed to persist OCR document into database. Transaction rolled back.",
-                },
-            )
+        logger.info(f"Successfully processed document [{document_uuid}] with {len(extracted_fields)} fields.")
 
         return {
             "success": True,
             "document_uuid": document_uuid,
             "processing_status": ProcessingStatus.COMPLETED.value,
+            "ocr_engine": ocr_engine,
+            "raw_text": raw_text,
             "extracted_fields": extracted_fields,
             "confidence": round(ocr_confidence, 2),
         }
+

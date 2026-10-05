@@ -1,9 +1,9 @@
 import logging
-from fastapi import APIRouter, Depends, UploadFile, File, status
-from sqlalchemy.orm import Session
-from app.database.database import get_db
+from typing import Optional
+from fastapi import APIRouter, UploadFile, File, Form, status
 from app.schemas.document import OCRSuccessResponse, OCRErrorResponse
 from app.services.document_service import DocumentService
+
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +20,13 @@ router = APIRouter(prefix="/api/v1/ocr", tags=["OCR"])
         500: {"model": OCRErrorResponse, "description": "Server or OCR processing error"},
     },
     summary="Upload và OCR file PDF 1 trang",
-    description="Nhận file PDF qua multipart/form-data, trích xuất text trực tiếp hoặc OCR, lưu vào MySQL và trả về JSON.",
+    description="Nhận file PDF qua multipart/form-data, hỗ trợ tùy biến lọc các fields mong muốn (target_fields), trích xuất text và trả về JSON.",
 )
 async def upload_pdf(
     file: UploadFile = File(..., description="File PDF cần xử lý OCR (tối đa 10MB)"),
-    db: Session = Depends(get_db),
+    target_fields: Optional[str] = Form(None, description="Danh sách các trường cần lấy, phân cách bằng dấu phẩy. Ví dụ: 'license_type,copyright_owner,distributor,contract_id,issue_date,expiry_date'"),
 ):
-    result = await DocumentService.process_pdf(file=file, db=db)
+    selected_fields = [f.strip() for f in target_fields.split(",") if f.strip()] if target_fields else None
+    result = await DocumentService.process_pdf(file=file, target_fields=selected_fields)
     return result
+

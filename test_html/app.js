@@ -2,8 +2,34 @@
 document.addEventListener("DOMContentLoaded", () => {
   const apiUrlInput = document.getElementById("apiUrlInput");
   const btnCheckHealth = document.getElementById("btnCheckHealth");
+  const presetSelect = document.getElementById("presetSelect");
+  const targetFieldsInput = document.getElementById("targetFieldsInput");
   const serverPill = document.getElementById("serverPill");
   const serverStatusText = document.getElementById("serverStatusText");
+
+  // Xử lý thay đổi Preset Profile
+  if (presetSelect && targetFieldsInput) {
+    presetSelect.addEventListener("change", () => {
+      const val = presetSelect.value;
+      if (val === "song_license") {
+        targetFieldsInput.style.display = "block";
+        targetFieldsInput.value = "license_type,copyright_owner,distributor,contract_id,issue_date,expiry_date";
+      } else if (val === "profile") {
+        targetFieldsInput.style.display = "block";
+        targetFieldsInput.value = "full_name,dob,id_card_no,address,email,phone_number";
+      } else if (val === "invoice") {
+        targetFieldsInput.style.display = "block";
+        targetFieldsInput.value = "document_no,date,tax_code,total_amount,customer_name";
+      } else if (val === "all") {
+        targetFieldsInput.style.display = "none";
+        targetFieldsInput.value = "";
+      } else if (val === "custom") {
+        targetFieldsInput.style.display = "block";
+        targetFieldsInput.focus();
+      }
+    });
+  }
+
 
   const dropzone = document.getElementById("dropzone");
   const fileInput = document.getElementById("fileInput");
@@ -20,6 +46,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const resultContent = document.getElementById("resultContent");
   const fieldsGrid = document.getElementById("fieldsGrid");
   const docUuid = document.getElementById("docUuid");
+  const rawTextViewer = document.getElementById("rawTextViewer");
+  const btnCopyRawText = document.getElementById("btnCopyRawText");
   const jsonViewer = document.getElementById("jsonViewer");
   const btnCopyJson = document.getElementById("btnCopyJson");
 
@@ -167,6 +195,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const formData = new FormData();
     formData.append("file", selectedFile);
+    const targetFieldsVal = targetFieldsInput ? targetFieldsInput.value.trim() : "";
+    if (targetFieldsVal) {
+      formData.append("target_fields", targetFieldsVal);
+    }
 
     const startTime = performance.now();
 
@@ -207,8 +239,15 @@ document.addEventListener("DOMContentLoaded", () => {
     tagConfidence.textContent = `Confidence: ${conf}%`;
     tagConfidence.classList.remove("hidden");
 
-    // Đoán engine: nếu thời gian < 100ms hoặc conf == 100% thì thường là Direct Text
-    const engineName = elapsedMs < 200 ? "⚡ Direct Text (PyMuPDF)" : "🔍 PaddleOCR 200 DPI";
+    // Đoán hoặc dùng trực tiếp engine trả về
+    let engineName = "⚡ Direct Text (PyMuPDF)";
+    if (data.ocr_engine === "paddleocr") {
+      engineName = "🔍 PaddleOCR 200 DPI";
+    } else if (data.ocr_engine === "direct_text") {
+      engineName = "⚡ Direct Text (PyMuPDF)";
+    } else if (elapsedMs >= 200) {
+      engineName = "🔍 PaddleOCR 200 DPI";
+    }
     tagEngine.textContent = engineName;
     tagEngine.classList.remove("hidden");
 
@@ -221,6 +260,21 @@ document.addEventListener("DOMContentLoaded", () => {
     const fieldKeys = Object.keys(fields);
 
     const fieldLabels = {
+      // Bản quyền & Giấy phép bài hát (song_licenses)
+      license_type: "Loại Bản Quyền / Giấy Phép",
+      copyright_owner: "Chủ Sở Hữu Quyền Tác Giả",
+      distributor: "Đơn Vị Phân Phối",
+      contract_id: "Mã Hợp Đồng (Contract ID)",
+      issue_date: "Ngày Cấp / Bắt Đầu",
+      expiry_date: "Ngày Hết Hạn",
+      // Thông tin cá nhân / hồ sơ
+      full_name: "Họ và Tên",
+      dob: "Ngày Sinh",
+      id_card_no: "Số CCCD / CMND",
+      address: "Địa Chỉ",
+      email: "Email",
+      phone_number: "Số Điện Thoại",
+      // Hóa đơn & chứng từ
       title: "Tiêu Đề Văn Bản",
       document_no: "Số Hóa Đơn / Văn Bản",
       date: "Ngày Phát Hành",
@@ -232,7 +286,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (fieldKeys.length === 0) {
       fieldsGrid.innerHTML = `
         <div style="grid-column: 1 / -1; padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px;">
-          (Không tìm thấy các trường thông tin chuẩn theo mẫu, xem raw JSON bên dưới)
+          (Không tìm thấy các trường thông tin theo mẫu, vui lòng xem văn bản đầy đủ bên dưới)
         </div>
       `;
     } else {
@@ -242,14 +296,22 @@ document.addEventListener("DOMContentLoaded", () => {
           val = new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(val);
         }
 
+        const isHighlight = ["document_no", "tax_code", "total_amount", "id_card_no", "phone_number", "email", "contract_id", "license_type"].includes(key);
+
+
         const box = document.createElement("div");
         box.className = "field-box";
         box.innerHTML = `
-          <div class="field-box-label">${fieldLabels[key] || key}</div>
-          <div class="field-box-value ${["document_no", "tax_code", "total_amount"].includes(key) ? "highlight" : ""}">${escapeHtml(String(val))}</div>
+          <div class="field-box-label">${fieldLabels[key] || key.replace(/_/g, " ").toUpperCase()}</div>
+          <div class="field-box-value ${isHighlight ? "highlight" : ""}">${escapeHtml(String(val))}</div>
         `;
         fieldsGrid.appendChild(box);
       });
+    }
+
+    // Render Raw Extracted Text
+    if (rawTextViewer) {
+      rawTextViewer.textContent = data.raw_text || "(Không có text trích xuất)";
     }
 
     // Render Raw JSON
@@ -266,7 +328,21 @@ document.addEventListener("DOMContentLoaded", () => {
       </div>
     `;
     docUuid.textContent = "Thao tác không thành công";
+    if (rawTextViewer) {
+      rawTextViewer.textContent = "(Lỗi khi xử lý tài liệu)";
+    }
     jsonViewer.textContent = JSON.stringify({ success: false, error_code: errorCode, message }, null, 2);
+  }
+
+  // Copy Raw Text button
+  if (btnCopyRawText) {
+    btnCopyRawText.addEventListener("click", () => {
+      navigator.clipboard.writeText(rawTextViewer.textContent).then(() => {
+        const orig = btnCopyRawText.textContent;
+        btnCopyRawText.textContent = "Đã Sao Chép!";
+        setTimeout(() => (btnCopyRawText.textContent = orig), 2000);
+      });
+    });
   }
 
   // Copy JSON button
@@ -277,6 +353,7 @@ document.addEventListener("DOMContentLoaded", () => {
       setTimeout(() => (btnCopyJson.textContent = orig), 2000);
     });
   });
+
 
   // Helper
   function formatBytes(bytes) {
