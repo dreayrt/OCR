@@ -1,0 +1,60 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: ocr-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password_secure
+      MYSQL_DATABASE: ocr_db
+      MYSQL_USER: ocr_user
+      MYSQL_PASSWORD: ocr_password_secure_123
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - ocr_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "ocr_user", "-pocr_password_secure_123"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  ocr-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ocr-service:latest
+    container_name: ocr-service
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      APP_NAME: "OCR Service"
+      APP_ENV: "production"
+      DEBUG: "false"
+      HOST: "0.0.0.0"
+      PORT: "8000"
+      DB_HOST: "mysql"
+      DB_PORT: "3306"
+      DB_NAME: "ocr_db"
+      DB_USER: "ocr_user"
+      DB_PASSWORD: "ocr_password_secure_123"
+      MAX_UPLOAD_SIZE_MB: "10"
+      OCR_LANGUAGE: "vi"
+      PDF_RENDER_DPI: "200"
+      MIN_TEXT_LENGTH_THRESHOLD: "20"
+    ports:
+      - "8000:8000"
+    networks:
+      - ocr_network
+
+volumes:
+  mysql_data:
+    driver: local
+
+networks:
+  ocr_network:
+    driver: bridge
