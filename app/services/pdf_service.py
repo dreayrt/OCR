@@ -11,6 +11,35 @@ logger = logging.getLogger(__name__)
 
 class PDFService:
     @staticmethod
+    def inspect_and_extract_pages(file_bytes: bytes):
+        """Yield native text or a rendered image for each PDF page."""
+        try:
+            doc = fitz.open(stream=file_bytes, filetype="pdf")
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail={"error_code": "INVALID_PDF", "message": str(exc)}) from exc
+        try:
+            if doc.is_encrypted or doc.page_count < 1:
+                raise HTTPException(status_code=400, detail={"error_code": "INVALID_PDF", "message": "PDF is encrypted or empty."})
+            if doc.page_count > settings.PDF_MAX_PAGES:
+                raise HTTPException(status_code=413, detail={"error_code": "TOO_MANY_PAGES", "message": f"PDF exceeds {settings.PDF_MAX_PAGES} pages."})
+            for index, page in enumerate(doc):
+                direct_text = clean_text(page.get_text("text") or "")
+                # A PDF may have searchable contract text but a scanned price table.
+                # OCR pages with embedded images as well, keeping the native text.
+                if len(direct_text) >= settings.MIN_TEXT_LENGTH_THRESHOLD and not page.get_images(full=True):
+                    yield index + 1, direct_text, None
+                    continue
+                pix = page.get_pixmap(matrix=fitz.Matrix(settings.PDF_RENDER_DPI / 72.0, settings.PDF_RENDER_DPI / 72.0), alpha=False)
+                image = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, pix.n))
+                if pix.n == 4:
+                    image = image[:, :, :3]
+                elif pix.n == 1:
+                    image = np.repeat(image, 3, axis=2)
+                yield index + 1, direct_text, image
+        finally:
+            doc.close()
+
+    @staticmethod
     def inspect_and_extract_page(
         file_bytes: bytes,
     ) -> Tuple[str, Optional[np.ndarray], bool]:

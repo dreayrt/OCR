@@ -19,11 +19,11 @@ router = APIRouter(prefix="/api/v1/ocr", tags=["OCR"])
         413: {"model": OCRErrorResponse, "description": "File too large"},
         500: {"model": OCRErrorResponse, "description": "Server or OCR processing error"},
     },
-    summary="Upload và OCR file PDF 1 trang",
-    description="Nhận file PDF qua multipart/form-data, hỗ trợ tùy biến lọc các fields mong muốn (target_fields), trích xuất text và trả về JSON.",
+    summary="Trích xuất thông tin từ PDF hoặc hình ảnh bản quyền",
+    description="Nhận PDF, PNG hoặc JPG qua multipart/form-data, trích xuất văn bản và trả về các trường được yêu cầu.",
 )
-async def upload_pdf(
-    file: UploadFile = File(..., description="File PDF cần xử lý OCR (tối đa 10MB)"),
+async def upload_document(
+    file: UploadFile = File(..., description="PDF, PNG hoặc JPG (tối đa 10MB)"),
     target_fields: Optional[str] = Form(None, description="Danh sách các trường cần lấy, phân cách bằng dấu phẩy. Ví dụ: 'license_type,copyright_owner,distributor,contract_id,issue_date,expiry_date'"),
 ):
     selected_fields = [f.strip() for f in target_fields.split(",") if f.strip()] if target_fields else None

@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     # OCR & PDF Processing Settings
     OCR_LANGUAGE: str = "vi"
     PDF_RENDER_DPI: int = 200
+    PDF_MAX_PAGES: int = 20
     MIN_TEXT_LENGTH_THRESHOLD: int = 20
 
     model_config = {

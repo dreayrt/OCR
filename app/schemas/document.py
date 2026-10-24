@@ -26,6 +26,7 @@ class OCRSuccessResponse(BaseModel):
     ocr_engine: Optional[str] = "direct_text"
     raw_text: Optional[str] = None
     extracted_fields: Dict[str, Any]
+    field_evidence: Dict[str, Any] = Field(default_factory=dict)
     confidence: float
 
     model_config = {

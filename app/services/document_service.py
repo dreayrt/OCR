@@ -1,9 +1,11 @@
 import logging
+import io
 from typing import Dict, Any, Optional, List
 from fastapi import UploadFile, HTTPException, status
+import numpy as np
+from PIL import Image, UnidentifiedImageError
 
-from app.config import settings
-from app.utils.validators import validate_pdf_file
+from app.utils.validators import validate_pdf_or_image_file
 from app.utils.file_utils import generate_document_uuid
 from app.services.pdf_service import PDFService
 from app.services.ocr_service import OCRService
@@ -43,32 +45,53 @@ class DocumentService:
             )
 
         # 1. Validation
-        validate_pdf_file(file, file_bytes)
+        document_format = validate_pdf_or_image_file(file, file_bytes)
         document_uuid = generate_document_uuid()
         file_size = len(file_bytes)
-        mime_type = file.content_type or "application/pdf"
+        mime_type = file.content_type or "application/octet-stream"
         original_filename = file.filename or "unknown.pdf"
 
         logger.info(f"Processing document [{document_uuid}] - {original_filename} ({file_size} bytes)")
 
-        # 2. Xử lý PDF và Text Extraction
+        # 2. Extract native text where available; use PaddleOCR for scans/images
         raw_text = ""
         ocr_engine = "direct_text"
         ocr_confidence = 1.0
 
         try:
-            direct_text, img_np, is_ocr_needed = PDFService.inspect_and_extract_page(file_bytes)
-
-            if not is_ocr_needed:
-                # Trích xuất text trực tiếp thành công
-                raw_text = direct_text
-                ocr_engine = "direct_text"
-                ocr_confidence = 1.0
+            if document_format == "pdf":
+                page_texts = []
+                page_confidences = []
+                for page_number, direct_text, img_np in PDFService.inspect_and_extract_pages(file_bytes):
+                    if img_np is not None:
+                        scanned_text, page_confidence = OCRService.get_instance().ocr_image(img_np)
+                        direct_text = "\n".join(part for part in (direct_text, scanned_text) if part)
+                        page_confidences.append(page_confidence)
+                        ocr_engine = "hybrid" if page_texts else "paddleocr"
+                    page_texts.append(f"--- PAGE {page_number} ---\n{direct_text}")
+                raw_text = "\n".join(page_texts)
+                if page_confidences:
+                    ocr_confidence = min(page_confidences)
             else:
-                # Fallback sang PaddleOCR
+                try:
+                    with Image.open(io.BytesIO(file_bytes)) as image:
+                        image.verify()
+                    with Image.open(io.BytesIO(file_bytes)) as image:
+                        if image.width * image.height > 40_000_000:
+                            raise HTTPException(
+                                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                                detail={"error_code": "IMAGE_TOO_LARGE", "message": "Image dimensions exceed the OCR limit."},
+                            )
+                        img_np = np.asarray(image.convert("RGB"))
+                except (UnidentifiedImageError, OSError) as e:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={"error_code": "INVALID_IMAGE", "message": "The uploaded image is invalid or corrupted."},
+                    ) from e
                 ocr_service = OCRService.get_instance()
                 raw_text, ocr_confidence = ocr_service.ocr_image(img_np)
                 ocr_engine = "paddleocr"
+                raw_text = f"--- PAGE 1 ---\n{raw_text}"
 
         except HTTPException:
             raise
@@ -83,11 +106,14 @@ class DocumentService:
         extracted_fields, field_confidences = ExtractionService.extract_fields(
             raw_text, base_confidence=ocr_confidence
         )
+        cost_evidence = ExtractionService.extract_acquisition_cost(raw_text)
+        field_evidence = {"acquisition_cost_vnd": cost_evidence} if cost_evidence else {}
 
         # Lọc danh sách fields nếu client chỉ định target_fields cụ thể
         if target_fields:
             extracted_fields = {k: v for k, v in extracted_fields.items() if k in target_fields}
             field_confidences = {k: v for k, v in field_confidences.items() if k in target_fields}
+            field_evidence = {k: v for k, v in field_evidence.items() if k in target_fields}
 
 
         logger.info(f"Successfully processed document [{document_uuid}] with {len(extracted_fields)} fields.")
@@ -99,6 +125,6 @@ class DocumentService:
             "ocr_engine": ocr_engine,
             "raw_text": raw_text,
             "extracted_fields": extracted_fields,
+            "field_evidence": field_evidence,
             "confidence": round(ocr_confidence, 2),
         }
-

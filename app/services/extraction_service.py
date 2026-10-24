@@ -1,5 +1,6 @@
 import re
 import logging
+from decimal import Decimal, InvalidOperation
 from typing import Dict, Any, Tuple
 from app.utils.validators import clean_text
 
@@ -98,6 +99,11 @@ class ExtractionService:
             fields["expiry_date"] = expiry_d
             confidences["expiry_date"] = base_confidence
 
+        cost = cls.extract_acquisition_cost(text)
+        if cost:
+            fields["acquisition_cost_vnd"] = cost["amount_vnd"]
+            confidences["acquisition_cost_vnd"] = round(base_confidence * 0.9, 2)
+
         # --- C. TRÍCH XUẤT HÓA ĐƠN / TÀI LIỆU CHỨNG TỪ ---
         # 13. Tiêu đề (Title)
         title = cls._extract_title(text)
@@ -140,6 +146,68 @@ class ExtractionService:
 
         logger.info(f"Extraction completed: {len(fields)} fields identified.")
         return fields, confidences
+
+    @staticmethod
+    def extract_acquisition_cost(text: str) -> Dict[str, Any]:
+        """Return an explicit song rights cost in VND when its label and amount are clear."""
+        label = re.compile(
+            r"(?:chi\s*ph[ií]\s*mua\s*quy[eề]n|chi\s*ph[ií]\s*b[aả]n\s*quy[eề]n|"
+            r"ph[ií]\s*mua\s*b[aả]n\s*quy[eề]n|"
+            r"gi[aá]\s*mua\s*b[aả]n\s*quy[eề]n|"
+            r"gi[aá]\s*tr[iị]\s*chuy[eể]n\s*nhượng\s*quy[eề]n|ph[ií]\s*c[aấ]p\s*quy[eề]n\s*m[oộ]t\s*l[aầ]n|"
+            r"license\s*acquisition\s*(?:cost|fee)|buyout\s*(?:cost|fee|amount))",
+            re.IGNORECASE,
+        )
+        money = re.compile(
+            r"(?P<number>\d[\d.,\s]*\d|\d)\s*(?P<scale>triệu|trieu|nghìn|nghin|ngàn|ngan)?\s*"
+            r"(?P<currency>VNĐ|VND|đồng|dong|đ|USD|\$)?",
+            re.IGNORECASE,
+        )
+        page = 1
+        candidates = []
+        lines = text.splitlines()
+        for index, line in enumerate(lines):
+            page_marker = re.match(r"--- PAGE (\d+) ---", line)
+            if page_marker:
+                page = int(page_marker.group(1))
+                continue
+            match = label.search(line)
+            if not match:
+                continue
+            context = line[match.end():].strip(" :.-\t")
+            if not context and index + 1 < len(lines):
+                context = lines[index + 1].strip()
+            if re.search(r"nhiều\s*bài|danh\s*sách\s*bài|toàn\s*bộ\s*album|catalog", line + " " + context, re.IGNORECASE):
+                continue
+            if re.search(r"miễn\s*phí|không\s*thu\s*phí|free\s*of\s*charge", context, re.IGNORECASE):
+                candidates.append({"amount_vnd": 0, "page": page, "source_text": line.strip()})
+                continue
+            found = money.search(context)
+            if not found:
+                continue
+            currency = (found.group("currency") or "").upper()
+            if currency not in ("VNĐ", "VND", "ĐỒNG", "DONG", "Đ"):
+                continue
+            number = re.sub(r"\s+", "", found.group("number"))
+            scale = (found.group("scale") or "").lower()
+            try:
+                if scale:
+                    value = Decimal(number.replace(",", ".")) * (1_000_000 if scale in ("triệu", "trieu") else 1_000)
+                else:
+                    sep = max(number.rfind("."), number.rfind(","))
+                    fraction = len(number) - sep - 1 if sep >= 0 else 0
+                    if fraction in (1, 2):
+                        value = Decimal(re.sub(r"[.,]", "", number[:sep]) + "." + number[sep + 1:])
+                    else:
+                        value = Decimal(re.sub(r"[.,]", "", number))
+                if value < 0 or value != value.to_integral_value():
+                    continue
+                candidates.append({"amount_vnd": int(value), "page": page, "source_text": line.strip()})
+            except InvalidOperation:
+                continue
+        if not candidates or len({item["amount_vnd"] for item in candidates}) != 1:
+            return {}
+        return candidates[0]
 
 
     @staticmethod
@@ -231,35 +299,28 @@ class ExtractionService:
     def _extract_license_type(text: str) -> str:
         """
         Trích xuất loại bản quyền / giấy phép:
-        DIGITAL_STREAMING, EXCLUSIVE, NON_EXCLUSIVE, MASTER_USE, SYNC, MECHANICAL...
+        Lấy trực tiếp giá trị text nguyên bản từ PDF mà KHÔNG gán cứng cố định.
         """
-        # Mẫu có nhãn rõ ràng
         patterns = [
-            r"(?:Loại\s*bản\s*quyền\s*\/?\s*giấy\s*phép|Loại\s*giấy\s*phép|Loại\s*bản\s*quyền|Hình\s*thức\s*cấp\s*phép|License\s*Type)\s*[:.]?\s*([^\n\r]+)",
+            r"(?:Loại\s*bản\s*quyền\s*\/?\s*giấy\s*phép|Loai\s*ban\s*quyen\s*\/?\s*giay\s*phep|Loại\s*giấy\s*phép|Loai\s*giay\s*phep|Loại\s*bản\s*quyền|Loai\s*ban\s*quyen|Hình\s*thức\s*cấp\s*phép|Hinh\s*thuc\s*cap\s*phep|Hình\s*thức\s*bản\s*quyền|Hinh\s*thuc\s*ban\s*quyen|License\s*Type|Phạm\s*vi\s*cấp\s*phép|Pham\s*vi\s*cap\s*phep)\s*[:.]?\s*([^\n\r]+)",
         ]
-        raw_val = ""
         for p in patterns:
             m = re.search(p, text, re.IGNORECASE)
             if m:
-                raw_val = m.group(1).strip()
-                break
+                val = m.group(1).strip()
+                if val:
+                    return val
 
-        search_corpus = f"{raw_val} {text}".lower()
-
-        if any(k in search_corpus for k in ["digital_streaming", "digital streaming", "phát trực tuyến", "nhạc số", "streaming"]):
+        # Fallback nếu không có nhãn rõ ràng
+        search_corpus = text.lower()
+        if "exclusive" in search_corpus or "độc quyền" in search_corpus or "doc quyen" in search_corpus:
+            return "EXCLUSIVE_LICENSE"
+        if "master" in search_corpus:
+            return "MASTER_LICENSE"
+        if "streaming" in search_corpus or "digital" in search_corpus:
             return "DIGITAL_STREAMING"
-        if any(k in search_corpus for k in ["non_exclusive", "non-exclusive", "không độc quyền"]):
-            return "NON_EXCLUSIVE"
-        if any(k in search_corpus for k in ["exclusive", "độc quyền", "toàn quyền"]):
-            return "EXCLUSIVE"
-        if any(k in search_corpus for k in ["master_use", "master use", "quyền bản ghi", "bản ghi âm"]):
-            return "MASTER_USE"
-        if any(k in search_corpus for k in ["sync", "đồng bộ", "synchronization"]):
-            return "SYNC"
-        if any(k in search_corpus for k in ["mechanical", "tái sản xuất", "sao chép"]):
-            return "MECHANICAL"
 
-        return raw_val if raw_val else ""
+        return ""
 
     @staticmethod
     def _extract_copyright_owner(text: str) -> str:

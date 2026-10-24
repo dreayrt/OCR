@@ -1,4 +1,5 @@
 import re
+import io
 from fastapi import UploadFile, HTTPException, status
 from app.config import settings
 
@@ -49,6 +50,37 @@ def validate_pdf_file(file: UploadFile, file_bytes: bytes) -> None:
                 "message": "File does not appear to be a valid or uncorrupted PDF (missing %PDF- header).",
             },
         )
+
+
+def validate_pdf_or_image_file(file: UploadFile, file_bytes: bytes) -> str:
+    """Validate supported PDF and image license documents."""
+    filename = (file.filename or "").lower()
+    extension = filename.rsplit(".", 1)[-1] if "." in filename else ""
+    max_size_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail={"error_code": "EMPTY_FILE", "message": "The uploaded file is empty."})
+    if len(file_bytes) > max_size_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail={"error_code": "FILE_TOO_LARGE", "message": f"File size exceeds maximum limit of {settings.MAX_UPLOAD_SIZE_MB}MB."},
+        )
+
+    if extension == "pdf":
+        validate_pdf_file(file, file_bytes)
+        return "pdf"
+    if extension in ("png", "jpg", "jpeg"):
+        allowed_mimes = {
+            "png": ("image/png", "application/octet-stream"),
+            "jpg": ("image/jpeg", "application/octet-stream"),
+            "jpeg": ("image/jpeg", "application/octet-stream"),
+        }
+        if file.content_type and file.content_type.lower() not in allowed_mimes[extension]:
+            raise HTTPException(status_code=400, detail={"error_code": "INVALID_MIME_TYPE", "message": "Invalid image MIME type."})
+        return extension
+    raise HTTPException(
+        status_code=400,
+        detail={"error_code": "UNSUPPORTED_FILE_TYPE", "message": "OCR supports PDF, PNG, and JPG files only."},
+    )
 
 
 def clean_text(text: str) -> str:
